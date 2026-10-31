@@ -583,6 +583,7 @@ function normalize(d){
   d.carts.forEach(c=>{c.notes=c.notes||'';c.tid=c.tid||'';c.sid=c.sid||'';c.backedUp=!!c.backedUp});
   d.hunts.forEach(h=>{h.days=h.days||{};h.log=h.log||[];h.caughtTargets=h.caughtTargets||[];h.collections=h.collections||[];h.carts=(h.carts||[]).filter(Boolean);h.step=h.step||1;h.odds=h.odds||8192;h.phaseStart=h.phaseStart||0});
   d.shinies.forEach(x=>{x.evos=x.evos||[];x.log=x.log||[];x.collections=x.collections||[];x.carts=(x.carts||[]).filter(Boolean);x.games=x.games||[]});
+  d.shinies.forEach(x=>{const h=d.hunts.find(h=>h.id===x.huntId);if(h)x.carts.forEach(c=>{if(!h.carts.includes(c))h.carts.push(c)})});
   return d;
 }
 function load(){
@@ -728,6 +729,7 @@ function evoKey(s,toDex){
   if(cur.slug&&cur.slug!=='f'){const m=c.find(x=>x.slug===cur.slug);if(m)return m.key}
   return toDex*100;
 }
+function syncHuntCarts(s){const h=findH(s.huntId);if(h)(s.carts||[]).forEach(c=>{if(!h.carts.includes(c))h.carts.push(c)})}
 const targetFor=(h,s)=>h.targets.find(t=>speciesOf(t)===speciesOf(origKey(s)))??null;
 /* attach a shiny to a hunt as a target or a phase, keeping the hunt's caught targets in step */
 function unlinkShiny(s){
@@ -1161,14 +1163,15 @@ V.carts=(id)=>{
 };
 function cartDetail(c){
   const hs=S.hunts.filter(h=>h.carts.includes(c.id)); const ss=S.shinies.filter(s=>s.carts.includes(c.id));
-  const enc=hs.reduce((a,h)=>a+h.encounters,0);
+  const loose=ss.filter(s=>!hs.some(h=>h.id===s.huntId));
+  const enc=hs.reduce((a,h)=>a+h.encounters,0)+loose.reduce((a,s)=>a+(s.encounters||0),0);
   return `<div class="inner"><div class="page-head"><div><a href="#/carts" class="lbl" style="text-decoration:none">All carts</a><h1 style="margin-top:10px">${esc(c.name)}</h1><p>${esc([c.game,c.lang==='JPN'?'Japanese':'English',c.format].filter(Boolean).join(', '))}</p></div><div class="row"><button class="btn" data-act="toggle-backup" data-id="${c.id}">${c.backedUp?'Mark not backed up':'Mark backed up'}</button><button class="btn" data-act="edit-cart" data-id="${c.id}">Edit</button></div></div>
   <section class="strip" style="--n:5">
     <div><span class="lbl">Status</span><div class="v" style="font-size:24px">${esc(c.use||'—')}</div></div>
     <div><span class="lbl">Progress</span><div class="v" style="font-size:24px">${esc(c.progress||'—')}</div></div>
     <div><span class="lbl">TID</span><div class="v" style="font-size:24px">${esc(c.tid||'—')}</div><div class="s">${c.sid?'SID '+esc(c.sid):''}</div></div>
     <div><span class="lbl">Shinies</span><div class="v">${ss.length}</div></div>
-    <div><span class="lbl">Encounters</span><div class="v">${fmt(enc)}</div><div class="s">across ${plural(hs.length,'hunt')}</div></div>
+    <div><span class="lbl">Encounters</span><div class="v">${fmt(enc)}</div><div class="s">across ${plural(hs.length,'hunt')}${loose.length?` and ${plural(loose.length,'logged shiny','logged shinies')}`:''}</div></div>
   </section>
   ${c.notes?`<div class="callout">${esc(c.notes)}</div>`:''}
   <div class="block"><h2 class="block-title">Hunts on this cart</h2>${hs.length?huntTable(hs):'<p class="muted">No hunts use this cart yet.</p>'}</div>
@@ -1491,6 +1494,7 @@ function shinyModal(s,isNew){
       const changed=(o.huntId||null)!==(s.huntId||null)||(o.huntId&&(role==='phase')!==!!s.isPhase);
       if(changed){unlinkShiny(s); if(o.huntId) linkShiny(s,o.huntId,role)}
     }
+    syncHuntCarts(s);
     if(isNew){S.shinies.push(s);save(true);rerender();burst();shinyDrawer(s.id);toast(`Logged ${shinyName(s)}`)}
     else{save(true);rerender();refreshDrawer();toast('Saved')}
   });
@@ -1537,7 +1541,7 @@ function foundModal(h){
     const sp=DEXMAP.get(key).dex; const target=rem.find(t=>DEXMAP.get(t).dex===sp);
     const s=blankShiny({huntId:h.id,isPhase:target==null,encounters:phaseEnc,huntTotal:h.encounters,prevPhaseStart:h.phaseStart,odds:h.odds,target:target??null});
     applyShiny(s,o); s.dexKey=key;
-    S.shinies.push(s); h.phaseStart=h.encounters;
+    S.shinies.push(s); h.phaseStart=h.encounters; syncHuntCarts(s);
     if(target!=null){h.caughtTargets.push(target); if(!remaining(h).length){h.status='done';h.ended=s.caught}}
     save(true);rerender();burst();buzz(80);
     toast(target!=null?(h.status==='done'?`${dexName(key)} caught. Hunt finished.`:`${dexName(key)} caught`):`Phase logged: ${dexName(key)}`);
